@@ -22,3 +22,14 @@ graph.json
 benchmarks/*.txt
 benchmarks/*.safetensors
 benchmarks/*.py
+
+# Devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+
+# direnv
+.direnv
+
+# pre-commit
+.pre-commit-config.yaml
