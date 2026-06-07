@@ -41,6 +41,7 @@ pub fn is_supported(model_type: &str) -> bool {
             | "starcoder2"
             | "llava-qwen2"
             | "deepseek_v2"
+            | "glm4_moe_lite"
     )
 }
 
@@ -220,6 +221,17 @@ mod tests {
     fn test_detect_model_type_deepseek_v2() {
         let dir = write_model_type_config("deepseek_v2");
         assert_eq!(detect_model_type(dir.path()).unwrap(), "deepseek_v2");
+    }
+
+    #[test]
+    fn test_is_supported_glm4_moe_lite() {
+        assert!(is_supported("glm4_moe_lite"));
+    }
+
+    #[test]
+    fn test_detect_model_type_glm4_moe_lite() {
+        let dir = write_model_type_config("glm4_moe_lite");
+        assert_eq!(detect_model_type(dir.path()).unwrap(), "glm4_moe_lite");
     }
 
     #[test]

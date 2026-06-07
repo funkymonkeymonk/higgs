@@ -3,6 +3,7 @@ pub mod cache;
 pub mod deepseek_v2;
 pub mod error;
 pub mod gemma2;
+pub mod glm4_moe_lite;
 pub mod llava_qwen2;
 pub mod phi3;
 pub mod qwen3_moe;
@@ -137,6 +138,8 @@ pub enum AnyModel {
     LlavaQwen2(llava_qwen2::LlavaQwen2Model),
     /// DeepSeek-V2 with Multi-head Latent Attention and sparse `MoE`.
     DeepSeekV2(deepseek_v2::DeepSeekV2CausalLM),
+    /// GLM-4.7-Flash with MLA and sparse MoE (glm4_moe_lite).
+    Glm4MoeLite(glm4_moe_lite::Glm4MoeLiteCausalLM),
     /// Bonsai-Q1: packed 1.25-bpw Qwen3-shaped target (1.7B / 8B).
     BonsaiQ1(bonsai_q1::BonsaiQ1Gpu),
 }
@@ -219,6 +222,7 @@ impl AnyModel {
             (Self::Starcoder2(m), AnyCache::KV(c)) => m.forward(inputs, mask, c),
             (Self::LlavaQwen2(m), AnyCache::KV(c)) => m.forward_text(inputs, mask, c),
             (Self::DeepSeekV2(m), AnyCache::KV(c)) => m.forward(inputs, mask, c),
+            (Self::Glm4MoeLite(m), AnyCache::KV(c)) => m.forward(inputs, mask, c),
             (Self::Qwen3Next(m), AnyCache::Hybrid(c)) => m.forward(inputs, mask, c),
             // BonsaiQ1 builds its causal mask internally; any externally-provided
             // mask is ignored (causal-only semantics).
@@ -249,6 +253,7 @@ impl AnyModel {
             (Self::Starcoder2(m), AnyCache::KV(c)) => m.forward_hidden(inputs, mask, c),
             (Self::LlavaQwen2(m), AnyCache::KV(c)) => m.forward_text_hidden(inputs, mask, c),
             (Self::DeepSeekV2(m), AnyCache::KV(c)) => m.forward_hidden(inputs, mask, c),
+            (Self::Glm4MoeLite(m), AnyCache::KV(c)) => m.forward_hidden(inputs, mask, c),
             (Self::Qwen3Next(m), AnyCache::Hybrid(c)) => m.forward_hidden(inputs, mask, c),
             (Self::BonsaiQ1(m), AnyCache::KV(c)) => bonsai_q1::forward_trunk_free(m, c, inputs),
             _ => Err(Exception::custom("Model/cache type mismatch")),
@@ -299,6 +304,7 @@ impl AnyModel {
             (Self::Starcoder2(m), AnyCache::KV(c)) => m.forward_all_logits(inputs, mask, c),
             (Self::LlavaQwen2(m), AnyCache::KV(c)) => m.forward_text_all_logits(inputs, mask, c),
             (Self::DeepSeekV2(m), AnyCache::KV(c)) => m.forward_all_logits(inputs, mask, c),
+            (Self::Glm4MoeLite(m), AnyCache::KV(c)) => m.forward_all_logits(inputs, mask, c),
             (Self::Qwen3Next(m), AnyCache::Hybrid(c)) => {
                 let (_, logits) = m.forward_with_hidden(inputs, mask, c)?;
                 Ok(logits)
@@ -395,6 +401,7 @@ impl AnyModel {
             | Self::Starcoder2(_)
             | Self::LlavaQwen2(_)
             | Self::DeepSeekV2(_)
+            | Self::Glm4MoeLite(_)
             | Self::BonsaiQ1(_) => Err(Exception::custom(
                 "Batched forward only supported for Transformer models",
             )),
@@ -408,13 +415,15 @@ impl AnyModel {
 
     /// Whether this model has a loaded MTP head for speculative decode.
     pub const fn has_mtp(&self) -> bool {
-        matches!(self, Self::Qwen3Next(m) if m.has_mtp())
+        matches!(self, Self::Glm4MoeLite(m) if m.args.num_nextn_predict_layers > 0)
+            || matches!(self, Self::Qwen3Next(m) if m.has_mtp())
     }
 
     /// Create a fresh MTP KV cache, or `None` if no MTP head.
     pub fn make_mtp_cache(&self) -> Option<MtpCache> {
         match self {
             Self::Qwen3Next(m) => m.make_mtp_cache(),
+            Self::Glm4MoeLite(_) => None,
             Self::Transformer(_)
             | Self::Qwen3Moe(_)
             | Self::Gemma2(_)
@@ -437,7 +446,8 @@ impl AnyModel {
     ) -> Result<Array, Exception> {
         match self {
             Self::Qwen3Next(m) => m.mtp_draft(hidden, next_token_id, mtp_cache),
-            Self::Transformer(_)
+            Self::Glm4MoeLite(_)
+            | Self::Transformer(_)
             | Self::Qwen3Moe(_)
             | Self::Gemma2(_)
             | Self::Phi3(_)
@@ -457,7 +467,8 @@ impl AnyModel {
     ) -> Result<(Array, Array), Exception> {
         match self {
             Self::Qwen3Next(m) => m.mtp_draft_with_hidden(hidden, next_token_id, mtp_cache),
-            Self::Transformer(_)
+            Self::Glm4MoeLite(_)
+            | Self::Transformer(_)
             | Self::Qwen3Moe(_)
             | Self::Gemma2(_)
             | Self::Phi3(_)
@@ -477,7 +488,8 @@ impl AnyModel {
     ) -> Result<(), Exception> {
         match self {
             Self::Qwen3Next(m) => m.mtp_advance(hidden, next_token_id, mtp_cache),
-            Self::Transformer(_)
+            Self::Glm4MoeLite(_)
+            | Self::Transformer(_)
             | Self::Qwen3Moe(_)
             | Self::Gemma2(_)
             | Self::Phi3(_)
@@ -497,7 +509,8 @@ impl AnyModel {
     ) -> Result<(), Exception> {
         match self {
             Self::Qwen3Next(m) => m.mtp_advance_many(hidden, next_token_ids, mtp_cache),
-            Self::Transformer(_)
+            Self::Glm4MoeLite(_)
+            | Self::Transformer(_)
             | Self::Qwen3Moe(_)
             | Self::Gemma2(_)
             | Self::Phi3(_)
@@ -519,6 +532,9 @@ impl AnyModel {
     ) -> Result<(Array, Array), Exception> {
         match (self, cache) {
             (Self::Qwen3Next(m), AnyCache::Hybrid(c)) => m.forward_with_hidden(inputs, mask, c),
+            (Self::Glm4MoeLite(_), AnyCache::KV(_)) => Err(Exception::custom(
+                "forward_with_hidden requires MTP head, not yet supported for Glm4MoeLite",
+            )),
             _ => Err(Exception::custom(
                 "forward_with_hidden only supported for Qwen3Next",
             )),
@@ -536,6 +552,7 @@ impl AnyModel {
             Self::Starcoder2(m) => m.args.hidden_size,
             Self::LlavaQwen2(m) => m.hidden_size(),
             Self::DeepSeekV2(m) => m.args.hidden_size,
+            Self::Glm4MoeLite(m) => m.args.hidden_size,
             Self::BonsaiQ1(m) => i32::try_from(m.config.hidden).unwrap_or(i32::MAX),
         }
     }
@@ -570,6 +587,10 @@ impl AnyModel {
                     .map_err(|err| Exception::custom(err.to_string()))?,
             )),
             Self::DeepSeekV2(m) => Ok((
+                m.args.num_key_value_heads,
+                m.args.qk_nope_head_dim + m.args.qk_rope_head_dim,
+            )),
+            Self::Glm4MoeLite(m) => Ok((
                 m.args.num_key_value_heads,
                 m.args.qk_nope_head_dim + m.args.qk_rope_head_dim,
             )),
@@ -673,6 +694,14 @@ impl AnyModel {
                 }
                 Ok(make_kv_cache(m.args.num_hidden_layers))
             }
+            Self::Glm4MoeLite(m) => {
+                if kv_cache_config.is_turboquant() {
+                    return Err(Exception::custom(
+                        "TurboQuant is only supported for standard KV transformer models",
+                    ));
+                }
+                Ok(make_kv_cache(m.args.num_hidden_layers))
+            }
             Self::Qwen3Next(m) => {
                 if kv_cache_config.is_turboquant() {
                     Ok(AnyCache::Hybrid(m.make_cache_turbo(kv_cache_config)?))
@@ -709,6 +738,7 @@ impl AnyModel {
             | Self::Phi3(_)
             | Self::Starcoder2(_)
             | Self::DeepSeekV2(_)
+            | Self::Glm4MoeLite(_)
             | Self::BonsaiQ1(_) => None,
         }
     }
@@ -730,6 +760,22 @@ impl AnyModel {
             _ => Err(Exception::custom(
                 "Model does not support multimodal forward",
             )),
+        }
+    }
+
+    /// Whether this model has loaded MTP head layers.
+    pub const fn mtp_num_layers(&self) -> i32 {
+        match self {
+            Self::Glm4MoeLite(m) => m.args.num_nextn_predict_layers,
+            Self::Qwen3Next(m) if m.has_mtp() => m.args.mtp_num_hidden_layers,
+            Self::Qwen3Next(_) | Self::Transformer(_)
+            | Self::Qwen3Moe(_)
+            | Self::Gemma2(_)
+            | Self::Phi3(_)
+            | Self::Starcoder2(_)
+            | Self::LlavaQwen2(_)
+            | Self::DeepSeekV2(_)
+            | Self::BonsaiQ1(_) => 0,
         }
     }
 }
