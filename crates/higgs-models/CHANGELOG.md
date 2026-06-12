@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/funkymonkeymonk/higgs/compare/higgs-models-v1.3.0...higgs-models-v1.4.0) (2026-06-12)
+
+
+### Miscellaneous Chores
+
+* **higgs-models:** Synchronize workspace versions
+
 ## [1.3.0](https://github.com/panbanda/higgs/compare/higgs-models-v1.2.0...higgs-models-v1.3.0) (2026-05-31)
 
 
