@@ -97,6 +97,11 @@ pub fn load_model<P: AsRef<Path>>(model_dir: P) -> Result<AnyModel, EngineError>
                 .map_err(EngineError::Model)?;
             Ok(AnyModel::DeepSeekV2(model))
         }
+        "glm4_moe_lite" => {
+            let model = higgs_models::glm4_moe_lite::load_glm4_moe_lite_model(&config.model_dir)
+                .map_err(EngineError::Model)?;
+            Ok(AnyModel::Glm4MoeLite(model))
+        }
         other => Err(EngineError::Model(
             higgs_models::error::ModelError::UnsupportedModel(other.to_owned()),
         )),
@@ -241,6 +246,12 @@ mod tests {
     fn model_config_from_dir_qwen3_5_moe() {
         let (_dir, result) = config_for_model("qwen3_5_moe");
         assert_eq!(result.unwrap().model_type, "qwen3_5_moe");
+    }
+
+    #[test]
+    fn model_config_from_dir_glm4_moe_lite() {
+        let (_dir, result) = config_for_model("glm4_moe_lite");
+        assert_eq!(result.unwrap().model_type, "glm4_moe_lite");
     }
 
     #[test]
